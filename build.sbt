@@ -15,7 +15,7 @@ lazy val specs2Version      = "4.0.2"
 lazy val twitterUtilVersion = "17.11.0"
 lazy val catbirdVersion     = "0.21.0"
 lazy val doobieVersion      = "0.5.0"
-lazy val catsEffectVersion  = "0.9"
+lazy val catsEffectVersion  = "0.10"
 lazy val fs2Version         = "0.10.2"
 
 lazy val eff = project.in(file("."))
@@ -47,6 +47,7 @@ lazy val cats = project.in(file("cats"))
   .settings(moduleName := "eff-cats-effect")
   .dependsOn(coreJVM)
   .settings(libraryDependencies ++= catsEffectJvm)
+  .settings(libraryDependencies ++= catsEffectLawsJvm)
   .settings(effSettings ++ commonJvmSettings:_*)
 
 lazy val macros = project.in(file("macros"))
@@ -308,6 +309,11 @@ lazy val doobieJvm = Seq(
 
 lazy val catsEffectJvm = Seq(
   "org.typelevel" %% "cats-effect" % catsEffectVersion)
+
+lazy val catsEffectLawsJvm = Seq(
+  "org.typelevel" %% "cats-effect-laws" % catsEffectVersion % "test",
+  "org.typelevel" %% "discipline" % "0.8"
+)
 
 lazy val monixLib = Seq(
   "io.monix" %% "monix" % monixVersion)

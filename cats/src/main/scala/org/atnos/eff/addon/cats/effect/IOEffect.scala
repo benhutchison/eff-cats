@@ -1,14 +1,15 @@
 package org.atnos.eff.addon.cats.effect
 
-import cats.effect.{Async, IO}
+import cats.effect._
 import cats.~>
 import org.atnos.eff._
 import org.atnos.eff.syntax.eff._
 
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent._
 import scala.concurrent.duration.Duration
 import scala.util.Either
 import IOEffect._
+import cats.effect.Fiber
 
 object IOEffect extends IOEffectCreation with IOInterpretation with IOInstances
 
@@ -26,19 +27,19 @@ trait IOEffectCreation extends IOTypes {
     io.send[R]
 
   final def ioRaiseError[R :_io, A](t: Throwable): Eff[R, A] =
-    IO.ioEffect.raiseError(t).send[R]
+    IO.raiseError(t).send[R]
 
   final def ioDelay[R :_io, A](io: =>A): Eff[R, A] =
-    IO.ioEffect.delay(io).send[R]
+    IO(io).send[R]
 
   final def ioFork[R :_io, A](io: =>A)(implicit ec: ExecutionContext): Eff[R, A] =
     ioShift >> ioDelay(io)
 
   final def ioSuspend[R :_io, A](io: =>IO[Eff[R, A]]): Eff[R, A] =
-    IO.ioEffect.suspend(io).send[R].flatten
+    IO.suspend(io).send[R].flatten
 
   final def ioShift[R :_io](implicit ec: ExecutionContext): Eff[R, Unit] =
-    IO.ioEffect.shift(ec).send[R]
+    IO.shift(ec).send[R]
 
 }
 
@@ -105,7 +106,7 @@ trait IOInstances extends IOTypes { outer =>
   }
 
 
-  def effectInstance[R :_Io](implicit runIO: Eff[R, Unit] => IO[Unit]): cats.effect.Effect[Eff[R, ?]] = new cats.effect.Effect[Eff[R, ?]] {
+  def effectInstance[R :_Io](implicit runIO: Eff[R, Unit] => IO[Unit]): ConcurrentEffect[Eff[R, ?]] = new ConcurrentEffect[Eff[R, ?]] {
     private val asyncInstance = outer.asyncInstance
 
     def runAsync[A](fa: Eff[R, A])(cb: Either[Throwable, A] => IO[Unit]): IO[Unit] =
@@ -131,6 +132,51 @@ trait IOInstances extends IOTypes { outer =>
 
     def tailRecM[A, B](a: A)(f: A => Eff[R, Either[A, B]]): Eff[R, B] =
       Eff.EffMonad[R].tailRecM(a)(f)
+
+    def cancelable[A](k: (Either[Throwable, A] => Unit) => IO[Unit]): Eff[R, A] =
+      fromIO(IO.cancelable(k))
+
+    def runCancelable[A](fa: Eff[R, A])(cb: Either[Throwable, A] => IO[Unit]): IO[IO[Unit]] =
+    {
+      val ref = new Ref[A];
+      runIO(fa.map{a => ref.value = a; ()}).map(_ => ref.value)
+    }.runCancelable(cb)
+
+    def uncancelable[A](fa: Eff[R, A]): Eff[R, A] =
+      fa.flatMap(a => fromIO(IO.unit.uncancelable).map(_ => a))
+
+    def onCancelRaiseError[A](fa: Eff[R, A], e: Throwable): Eff[R, A] =
+      fa.flatMap(a => fromIO(IO.unit.onCancelRaiseError(e)).map(_ => a))
+
+    def start[A](fa: Eff[R, A]): Eff[R, Fiber[Eff[R, ?], A]] =
+      fa.flatMap(a => {
+        fromIO(IO.unit.start.map(f => Fiber(fromIO(f.join.map(_ => a)), fromIO(f.cancel))))
+      })
+
+    def racePair[A, B](fa: Eff[R, A], fb: Eff[R, B]):
+      Eff[R, Either[(A, Fiber[Eff[R, ?], B]), (Fiber[Eff[R, ?], A], B)]] = {
+      val iop = IO.racePair(
+        {
+          val ref = new Ref[A];
+          runIO(fa.map{a => ref.value = a; ()}).map(_ => ref.value)
+        },
+        {
+          val ref = new Ref[B];
+          runIO(fb.map{b => ref.value = b; ()}).map(_ => ref.value)
+        }
+      )
+      fromIO(iop.map {
+        case Left((a, fiberB)) => Left((a, effFiber(fiberB)))
+        case Right((fiberA, b)) => Right((effFiber(fiberA), b))
+      })
+    }
+
+    private class Ref[A] {
+      var value : A = _
+    }
+
+
+    private def effFiber[A](f: Fiber[IO, A]): Fiber[Eff[R, ?], A] = Fiber(fromIO(f.join), fromIO(f.cancel))
   }
 }
 
