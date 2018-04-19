@@ -36,7 +36,7 @@ class IOEffectSpec(implicit ee: ExecutionEnv) extends Specification with ScalaCh
  IO effect is a lawful Async                             $e6
 
 //disabled until the weaker Async laws are green
-// IO effect is a lawful ConcurrentEffect
+ IO effect is a lawful ConcurrentEffect                  $e7
 
 """
 
@@ -91,14 +91,17 @@ class IOEffectSpec(implicit ee: ExecutionEnv) extends Specification with ScalaCh
   implicit def runIO: Eff[S, Unit] => IO[Unit] = _.runOption.map(_.getOrElse(())).to[IO]
   implicit val ce = IOEffect.effectInstance[S]
   implicit def arbitraryEff[A: Arbitrary]: Arbitrary[Eff[S, A]] = Arbitrary(Arbitrary.arbitrary[A].map(_.pureEff[S]))
-  implicit def eqEff[A: Eq]: Eq[Eff[S, A]] = Eq.instance((e1, e2) =>
-    e1.runOption.unsafeRunSync === e2.runOption.unsafeRunSync)
   implicit val tc = TestContext()
+  implicit def eqEff[A](implicit A: Eq[A]): Eq[Eff[S, A]] =
+    new Eq[Eff[S, A]] {
+      def eqv(x: Eff[S, A], y: Eff[S, A]): Boolean =
+        eqFuture[Option[A]].eqv(x.runOption.unsafeToFuture, y.runOption.unsafeToFuture)
+    }
 
 
   def e6 = checkAll("Eff", AsyncTests[Eff[S, ?]].async[Int, Int, Int])
 
-//  def e7 = checkAll("Eff", ConcurrentEffectTests[Eff[S, ?]].concurrentEffect[Int, Int, Int])
+  def e7 = checkAll("Eff", ConcurrentEffectTests[Eff[S, ?]].concurrentEffect[Int, Int, Int])
 
   /**
    * HELPERS

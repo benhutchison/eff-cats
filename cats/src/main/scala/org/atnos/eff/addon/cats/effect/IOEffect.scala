@@ -9,7 +9,6 @@ import scala.concurrent._
 import scala.concurrent.duration.Duration
 import scala.util.Either
 import IOEffect._
-import cats.effect.Fiber
 
 object IOEffect extends IOEffectCreation with IOInterpretation with IOInstances
 
@@ -137,10 +136,7 @@ trait IOInstances extends IOTypes { outer =>
       fromIO(IO.cancelable(k))
 
     def runCancelable[A](fa: Eff[R, A])(cb: Either[Throwable, A] => IO[Unit]): IO[IO[Unit]] =
-    {
-      val ref = new Ref[A];
-      runIO(fa.map{a => ref.value = a; ()}).map(_ => ref.value)
-    }.runCancelable(cb)
+      runIOValue(fa).runCancelable(cb)
 
     def uncancelable[A](fa: Eff[R, A]): Eff[R, A] =
       fa.flatMap(a => fromIO(IO.unit.uncancelable).map(_ => a))
@@ -149,23 +145,12 @@ trait IOInstances extends IOTypes { outer =>
       fa.flatMap(a => fromIO(IO.unit.onCancelRaiseError(e)).map(_ => a))
 
     def start[A](fa: Eff[R, A]): Eff[R, Fiber[Eff[R, ?], A]] =
-      fa.flatMap(a => {
-        fromIO(IO.unit.start.map(f => Fiber(fromIO(f.join.map(_ => a)), fromIO(f.cancel))))
-      })
+      fromIO(IO.unit.start.flatMap(fiber => runIOValue(fa).map(a =>
+        Fiber(fromIO(fiber.join.map(_ => a)), fromIO(fiber.cancel)))))
 
     def racePair[A, B](fa: Eff[R, A], fb: Eff[R, B]):
       Eff[R, Either[(A, Fiber[Eff[R, ?], B]), (Fiber[Eff[R, ?], A], B)]] = {
-      val iop = IO.racePair(
-        {
-          val ref = new Ref[A];
-          runIO(fa.map{a => ref.value = a; ()}).map(_ => ref.value)
-        },
-        {
-          val ref = new Ref[B];
-          runIO(fb.map{b => ref.value = b; ()}).map(_ => ref.value)
-        }
-      )
-      fromIO(iop.map {
+      fromIO(IO.racePair(runIOValue(fa), runIOValue(fb)).map {
         case Left((a, fiberB)) => Left((a, effFiber(fiberB)))
         case Right((fiberA, b)) => Right((effFiber(fiberA), b))
       })
@@ -175,6 +160,10 @@ trait IOInstances extends IOTypes { outer =>
       var value : A = _
     }
 
+    private def runIOValue[A](fa: Eff[R, A]) = {
+      val ref = new Ref[A];
+      runIO(fa.map{a => ref.value = a; ()}).map(_ => ref.value)
+    }
 
     private def effFiber[A](f: Fiber[IO, A]): Fiber[Eff[R, ?], A] = Fiber(fromIO(f.join), fromIO(f.cancel))
   }
