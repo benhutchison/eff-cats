@@ -4,16 +4,16 @@ import cats.implicits._
 import org.atnos.eff.all._
 import org.atnos.eff.syntax.all._
 import org.specs2._
-import org.specs2.concurrent.ExecutionEnv
+import org.specs2.concurrent._
 
-import scala.collection.mutable.ListBuffer
+import scala.collection.mutable._
 import monix.execution.Scheduler.Implicits.global
-import monix.eval.Task
+import monix.eval._
 import org.atnos.eff._
 import org.atnos.eff.addon.monix.task._
 import org.atnos.eff.syntax.addon.monix.task._
 
-import scala.concurrent.Await
+import scala.concurrent._
 import scala.concurrent.duration._
 
 class TaskEffectSpec(implicit ee: ExecutionEnv) extends Specification with ScalaCheck { def is = "monix task".title ^ sequential ^ s2"""
@@ -32,6 +32,8 @@ class TaskEffectSpec(implicit ee: ExecutionEnv) extends Specification with Scala
 
  Async boundaries can be introduced between computations $e12
  Task effect is stacksafe with traverseA                 $e13
+
+ Attempted task effects should not throw when run  $e14
 
 ## RETRIES
 
@@ -168,6 +170,16 @@ class TaskEffectSpec(implicit ee: ExecutionEnv) extends Specification with Scala
     }
 
     action.runAsync must not(throwA[Throwable])
+  }
+
+  def e14 = {
+    //throws
+//    taskDelay[Fx.fx1[Task], Unit](()).map(_ => throw new Exception()).
+//      taskAttempt.runAsync.runSyncUnsafe(1.seconds) must not(throwA[Throwable])
+
+    //works
+    taskDelay[Fx.fx1[Task], Unit](()).map(_ => throw new Exception()).
+      runAsync.attempt.runSyncUnsafe(1.seconds) must not(throwA[Throwable])
   }
 
   def retry1 = {
